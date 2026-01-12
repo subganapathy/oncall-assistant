@@ -1,0 +1,59 @@
+# Docker Compose for local development
+#
+# Usage:
+#   docker-compose up -d      # Start services
+#   docker-compose down       # Stop services
+#   docker-compose logs -f    # View logs
+
+version: "3.8"
+
+services:
+  # ─────────────────────────────────────────────────────────────
+  # PostgreSQL - Service Catalog storage
+  # ─────────────────────────────────────────────────────────────
+  postgres:
+    image: postgres:15-alpine
+    container_name: oncall-postgres
+    environment:
+      POSTGRES_DB: oncall
+      POSTGRES_USER: oncall
+      POSTGRES_PASSWORD: oncall
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U oncall -d oncall"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # ─────────────────────────────────────────────────────────────
+  # Catalog API - REST API for managing catalog
+  # ─────────────────────────────────────────────────────────────
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: api
+    container_name: oncall-api
+    environment:
+      NODE_ENV: development
+      PGHOST: postgres
+      PGPORT: 5432
+      PGDATABASE: oncall
+      PGUSER: oncall
+      PGPASSWORD: oncall
+      PORT: 3000
+    ports:
+      - "3000:3000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    # For development, mount source and use tsx watch
+    volumes:
+      - ./src:/app/src:ro
+    command: ["npm", "run", "dev:api"]
+
+volumes:
+  postgres_data:
