@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "oncall-assistant": {
+      "command": "node",
+      "args": ["/Users/subramanianganapathy/code/small-step-giant-leap/oncall-assistant/dist/index.js"],
+      "env": {
+        "BACKEND_MODE": "mock"
+      }
+    }
+  }
+}

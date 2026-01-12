@@ -106,7 +106,8 @@ app.get("/api/services/:name", asyncHandler(async (req, res) => {
     );
 
     if (!row) {
-        return res.status(404).json({ error: `Service '${name}' not found` });
+        res.status(404).json({ error: `Service '${name}' not found` });
+        return;
     }
 
     res.json(row);
@@ -131,10 +132,11 @@ app.post("/api/services", authenticate, asyncHandler(async (req, res) => {
 
     // Validate required fields
     if (!name || !team || !slack_channel || !pager_alias) {
-        return res.status(400).json({
+        res.status(400).json({
             error: "Missing required fields",
             required: ["name", "team", "slack_channel", "pager_alias"],
         });
+        return;
     }
 
     await execute(
@@ -175,7 +177,8 @@ app.patch("/api/services/:name", authenticate, asyncHandler(async (req, res) => 
     );
 
     if (!existing) {
-        return res.status(404).json({ error: `Service '${name}' not found` });
+        res.status(404).json({ error: `Service '${name}' not found` });
+        return;
     }
 
     // Build dynamic update query
@@ -210,7 +213,8 @@ app.patch("/api/services/:name", authenticate, asyncHandler(async (req, res) => 
     }
 
     if (setClauses.length === 0) {
-        return res.status(400).json({ error: "No valid fields to update" });
+        res.status(400).json({ error: "No valid fields to update" });
+        return;
     }
 
     values.push(name);  // For WHERE clause
@@ -257,11 +261,13 @@ app.get("/api/deployments/:service", asyncHandler(async (req, res) => {
     );
 
     if (!row) {
-        return res.status(404).json({ error: `Service '${service}' not found` });
+        res.status(404).json({ error: `Service '${service}' not found` });
+        return;
     }
 
     if (!row.deployment?.github_repo) {
-        return res.status(400).json({ error: `Service '${service}' has no deployment config` });
+        res.status(400).json({ error: `Service '${service}' has no deployment config` });
+        return;
     }
 
     // Query deployment history from GitHub
@@ -307,7 +313,8 @@ app.post("/webhooks/github", asyncHandler(async (req, res) => {
             Buffer.from(expectedSignature),
             Buffer.from(signature)
         )) {
-            return res.status(401).json({ error: "Invalid signature" });
+            res.status(401).json({ error: "Invalid signature" });
+            return;
         }
     }
 
@@ -332,11 +339,12 @@ app.post("/webhooks/github", asyncHandler(async (req, res) => {
             // const serviceConfig = await fetchServiceYaml(payload.repository.full_name);
             // await upsertService(serviceConfig);
 
-            return res.json({
+            res.json({
                 received: true,
                 action: "catalog_update_triggered",
                 repo: payload.repository?.full_name,
             });
+            return;
         }
     }
 

@@ -94,7 +94,12 @@ export class OpenSearchBackend implements LogsBackend {
             return { total_hits: 0, logs: [] };
         }
 
-        const data = await response.json();
+        const data = await response.json() as {
+            hits: {
+                total: { value: number } | number;
+                hits: Array<{ _source: Record<string, unknown> }>;
+            };
+        };
 
         const logs: LogEntry[] = data.hits.hits.map((hit: { _source: Record<string, unknown> }) => ({
             timestamp: hit._source["@timestamp"] as string,
@@ -104,8 +109,11 @@ export class OpenSearchBackend implements LogsBackend {
             ...hit._source,
         }));
 
+        const total = data.hits.total;
+        const totalHits = typeof total === "number" ? total : total.value;
+
         return {
-            total_hits: data.hits.total.value || data.hits.total,
+            total_hits: totalHits,
             logs,
         };
     }
@@ -212,8 +220,16 @@ export class OpenSearchBackend implements LogsBackend {
             return { count: 0, first_seen: "", last_seen: "", samples: [], scanned: 0 };
         }
 
-        const countData = await countResponse.json();
-        const totalHits = countData.hits.total.value || countData.hits.total;
+        const countData = await countResponse.json() as {
+            hits: {
+                total: { value: number } | number;
+            };
+            aggregations?: {
+                first_seen?: { value_as_string: string };
+                last_seen?: { value_as_string: string };
+            };
+        };
+        const totalHits = (countData.hits.total as { value: number })?.value || countData.hits.total as number;
 
         if (totalHits === 0) {
             return { count: 0, first_seen: "", last_seen: "", samples: [], scanned: totalHits };
@@ -234,7 +250,9 @@ export class OpenSearchBackend implements LogsBackend {
 
         let samples: LogEntry[] = [];
         if (sampleResponse.ok) {
-            const sampleData = await sampleResponse.json();
+            const sampleData = await sampleResponse.json() as {
+                hits: { hits: Array<{ _source: Record<string, unknown> }> };
+            };
             samples = sampleData.hits.hits.map((hit: { _source: Record<string, unknown> }) => ({
                 timestamp: hit._source["@timestamp"] as string,
                 level: hit._source.level as string || "error",

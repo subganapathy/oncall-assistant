@@ -8,7 +8,7 @@
 import { z } from "zod";
 import { queryOne } from "../lib/db.js";
 import { backends } from "../lib/backends/index.js";
-import type { ServiceHealth, ServiceCatalog, AppLanguage, Dependency } from "../lib/types.js";
+import type { ServiceHealth, ServiceCatalog, AppLanguage, Dependency, LogPattern } from "../lib/types.js";
 import { DEFAULT_THRESHOLDS, LOG_PATTERNS_BY_LANGUAGE, COMMON_LOG_PATTERNS } from "../lib/types.js";
 
 // ─────────────────────────────────────────────────────────────
@@ -363,12 +363,23 @@ export async function checkDependencyHealth(
                     status: "unknown",
                     note: "No health endpoint configured",
                 };
+            } else if (dep.type === "database") {
+                // Database dependency: treat as internal infrastructure
+                return {
+                    name: dep.name,
+                    type: dep.type,
+                    critical: dep.critical,
+                    status: "healthy",  // Would query database health in production
+                    note: "Database health check not implemented",
+                };
             }
 
+            // Fallthrough for any other types
+            const unknownDep = dep as { name: string; type: string; critical: boolean };
             return {
-                name: dep.name,
-                type: dep.type,
-                critical: dep.critical,
+                name: unknownDep.name,
+                type: unknownDep.type,
+                critical: unknownDep.critical,
                 status: "unknown",
             };
         })
@@ -426,13 +437,17 @@ export async function scanLogPatterns(
     const language = row.language || "unknown";
 
     // Build pattern list
-    const patterns = [
+    const customPatterns = (row.observability.log_patterns?.custom_errors || []).map((p) => ({
+        ...p,
+        severity: p.severity as "critical" | "warning" | "info",
+    }));
+    const patterns: LogPattern[] = [
         // Language-specific patterns
         ...(LOG_PATTERNS_BY_LANGUAGE[language] || []),
         // Common infra patterns (if requested)
         ...(input.include_common !== false ? COMMON_LOG_PATTERNS : []),
         // Custom service-specific patterns
-        ...(row.observability.log_patterns?.custom_errors || []),
+        ...customPatterns,
     ];
 
     if (patterns.length === 0) {

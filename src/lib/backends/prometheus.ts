@@ -173,7 +173,12 @@ export class PrometheusBackend implements MetricsBackend {
             return null;
         }
 
-        const data = await response.json();
+        const data = await response.json() as {
+            status: string;
+            data?: {
+                result?: Array<{ value: [number, string] }>;
+            };
+        };
 
         if (data.status !== "success" || !data.data?.result?.[0]?.value) {
             return null;

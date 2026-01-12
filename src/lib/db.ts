@@ -2,17 +2,148 @@
  * Database connection and utilities.
  *
  * This module provides a connection pool to PostgreSQL.
- * We use a pool (not single connection) because:
- * - Multiple requests can run concurrently
- * - Connections are reused (efficient)
- * - Automatic reconnection on failure
+ * In mock mode, it uses in-memory mock data instead.
  */
 
 import pg from "pg";
 const { Pool } = pg;
 
 // ─────────────────────────────────────────────────────────────
-// CONNECTION POOL
+// MOCK DATA (used when BACKEND_MODE=mock)
+// ─────────────────────────────────────────────────────────────
+
+const MOCK_SERVICES = [
+    {
+        name: "user-service",
+        description: "System of record for user accounts. Handles registration, authentication, and profile management.",
+        team: "payments",
+        slack_channel: "#payments-oncall",
+        pager_alias: "payments-escalation",
+        pagerduty_service: "user-service-prod",
+        language: "java",
+        observability: {
+            grafana_dashboard: "https://grafana.internal/d/user-service",
+            grafana_uid: "user-service-prod",
+            logs_index: "prod-user-service-*",
+            opensearch_index: "prod-user-service-*",
+            prometheus_job: "user-service",
+        },
+        dependencies: [
+            { name: "auth-service", type: "internal", critical: true },
+            { name: "postgres-users", type: "database", critical: true },
+        ],
+        deployment: {
+            repo: "github.com/acme/user-service",
+            github_repo: "github.com/acme/user-service",
+            gitops_path: "deploy/prod/deployment.yaml",
+            deployment_file: "deploy/prod/deployment.yaml",
+            argocd_app: "user-service-prod",
+            environment: "production",
+        },
+        automation: {
+            allowed_actions: ["restart_pod", "scale_up"],
+            requires_approval: ["rollback"],
+        },
+        runbook_path: "/runbooks/user-service/",
+        resources: [
+            {
+                pattern: "usr-*",
+                type: "user-account",
+                description: "User account resource. Contains profile, preferences, and auth tokens.",
+            },
+        ],
+    },
+    {
+        name: "auth-service",
+        description: "Authentication and authorization service. Handles login, tokens, and permissions.",
+        team: "identity",
+        slack_channel: "#identity-oncall",
+        pager_alias: "identity-escalation",
+        pagerduty_service: "auth-service-prod",
+        language: "go",
+        observability: {
+            grafana_dashboard: "https://grafana.internal/d/auth-service",
+            grafana_uid: "auth-service-prod",
+            logs_index: "prod-auth-service-*",
+            opensearch_index: "prod-auth-service-*",
+            prometheus_job: "auth-service",
+        },
+        dependencies: [
+            { name: "postgres-auth", type: "database", critical: true },
+        ],
+        deployment: {
+            repo: "github.com/acme/auth-service",
+            github_repo: "github.com/acme/auth-service",
+            gitops_path: "deploy/prod/deployment.yaml",
+            deployment_file: "deploy/prod/deployment.yaml",
+            argocd_app: "auth-service-prod",
+            environment: "production",
+        },
+        automation: {
+            allowed_actions: ["restart_pod"],
+            requires_approval: ["rollback", "scale_up"],
+        },
+        runbook_path: "/runbooks/auth-service/",
+        resources: [
+            {
+                pattern: "tok-*",
+                type: "auth-token",
+                description: "Authentication token. Short-lived, tied to user session.",
+            },
+            {
+                pattern: "sess-*",
+                type: "session",
+                description: "User session. Tracks login state and refresh tokens.",
+            },
+        ],
+    },
+    {
+        name: "order-service",
+        description: "System of record for customer orders. Handles order lifecycle from creation to fulfillment.",
+        team: "commerce",
+        slack_channel: "#commerce-oncall",
+        pager_alias: "commerce-escalation",
+        pagerduty_service: "order-service-prod",
+        language: "java",
+        observability: {
+            grafana_dashboard: "https://grafana.internal/d/order-service",
+            logs_index: "prod-order-service-*",
+            opensearch_index: "prod-order-service-*",
+            prometheus_job: "order-service",
+        },
+        dependencies: [
+            { name: "user-service", type: "internal", critical: true },
+            { name: "inventory-service", type: "internal", critical: true },
+        ],
+        deployment: {
+            repo: "github.com/acme/order-service",
+            github_repo: "github.com/acme/order-service",
+            gitops_path: "deploy/prod/deployment.yaml",
+            deployment_file: "deploy/prod/deployment.yaml",
+            environment: "production",
+        },
+        resources: [
+            {
+                pattern: "ord-*",
+                type: "order",
+                description: "Customer order. May spawn fulfillment workloads on data plane. Common issues: stuck in PENDING when inventory service is slow.",
+            },
+        ],
+    },
+];
+
+// ─────────────────────────────────────────────────────────────
+// MODE DETECTION
+// ─────────────────────────────────────────────────────────────
+
+function isMockMode(): boolean {
+    return process.env.BACKEND_MODE === "mock" ||
+           process.env.NODE_ENV === "test" ||
+           !!process.env.VITEST;
+}
+
+// ─────────────────────────────────────────────────────────────
+// CONNECTION POOL (only created in real mode)
 // ─────────────────────────────────────────────────────────────
 
 /**
@@ -22,7 +153,7 @@ const { Pool } = pg;
  * In production, set DATABASE_URL.
  * In development, docker-compose sets individual vars.
  */
-export const pool = new Pool({
+export const pool = isMockMode() ? null : new Pool({
     // If DATABASE_URL is set, use it (production pattern)
     connectionString: process.env.DATABASE_URL,
 
@@ -40,9 +171,33 @@ export const pool = new Pool({
 });
 
 // Log connection errors (don't crash, just log)
-pool.on("error", (err) => {
-    console.error("Unexpected database error:", err);
-});
+if (pool) {
+    pool.on("error", (err) => {
+        console.error("Unexpected database error:", err);
+    });
+}
+
+// ─────────────────────────────────────────────────────────────
+// MOCK QUERY IMPLEMENTATION
+// ─────────────────────────────────────────────────────────────
+
+function mockQuery<T>(text: string, params?: unknown[]): T[] {
+    // Handle services table queries
+    if (text.includes("FROM services")) {
+        // Handle resources IS NOT NULL filter
+        if (text.includes("resources IS NOT NULL")) {
+            return MOCK_SERVICES.filter((s) => s.resources && s.resources.length > 0) as T[];
+        }
+        // Handle team or name filter
+        if (params?.[0]) {
+            return MOCK_SERVICES.filter(
+                (s) => s.name === params[0] || s.team === params[0]
+            ) as T[];
+        }
+        return MOCK_SERVICES as T[];
+    }
+    return [];
+}
 
 // ─────────────────────────────────────────────────────────────
 // QUERY HELPERS
@@ -61,7 +216,10 @@ export async function query<T>(
     text: string,
     params?: unknown[]
 ): Promise<T[]> {
-    const result = await pool.query(text, params);
+    if (isMockMode()) {
+        return mockQuery<T>(text, params);
+    }
+    const result = await pool!.query(text, params);
     return result.rows as T[];
 }
 
@@ -95,7 +253,10 @@ export async function execute(
     text: string,
     params?: unknown[]
 ): Promise<void> {
-    await pool.query(text, params);
+    if (isMockMode()) {
+        return; // No-op in mock mode
+    }
+    await pool!.query(text, params);
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -107,8 +268,11 @@ export async function execute(
  * Used by health check endpoints.
  */
 export async function checkHealth(): Promise<boolean> {
+    if (isMockMode()) {
+        return true; // Always healthy in mock mode
+    }
     try {
-        await pool.query("SELECT 1");
+        await pool!.query("SELECT 1");
         return true;
     } catch {
         return false;
@@ -124,5 +288,7 @@ export async function checkHealth(): Promise<boolean> {
  * Call this when shutting down the server.
  */
 export async function close(): Promise<void> {
-    await pool.end();
+    if (pool) {
+        await pool.end();
+    }
 }

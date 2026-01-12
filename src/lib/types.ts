@@ -105,9 +105,18 @@ export interface ExternalDependency {
 }
 
 /**
+ * Database dependency (internal managed database).
+ */
+export interface DatabaseDependency {
+    name: string;                  // e.g., "postgres-users"
+    type: "database";
+    critical: boolean;
+}
+
+/**
  * Combined dependency type.
  */
-export type Dependency = InternalDependency | AwsDependency | ExternalDependency;
+export type Dependency = InternalDependency | AwsDependency | ExternalDependency | DatabaseDependency;
 
 /**
  * Deployment tracking via GitOps.

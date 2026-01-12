@@ -219,7 +219,7 @@ export class KubernetesApiBackend implements KubernetesBackend {
             return { pods: [] };
         }
 
-        const data = await response.json();
+        const data = await response.json() as { items: KubernetesPod[] };
 
         const pods: PodInfo[] = data.items.map((pod: KubernetesPod) => {
             const containerStatuses = pod.status.containerStatuses || [];
