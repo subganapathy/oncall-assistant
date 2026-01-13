@@ -11,14 +11,10 @@ Ask Claude things like:
 
 The AI figures out which tools to use. You just describe the problem.
 
-## Two Interfaces
+## How You Use It
 
-| Interface | How It Works |
-|-----------|--------------|
-| **Claude CLI** | Engineer types "Debug ord-1234" → Claude calls tools → diagnosis |
-| **Slack Bot** | Alert fires → bot auto-diagnoses → posts to thread |
-
-Both share the same backend: service catalog, resource handlers, observability.
+- **Interactive**: Ask Claude "Debug ord-1234" via Claude Code → Claude calls tools → you get a diagnosis
+- **Automated**: Slack bot watches alert channels → auto-diagnoses when alerts fire → posts to thread
 
 ## How Services Get Registered
 
@@ -276,6 +272,39 @@ npm test          # run tests
 npm run build     # compile typescript
 npm run dev       # watch mode
 ```
+
+## What's Not Done
+
+This is a working prototype. Here's what's missing for production use:
+
+**Cost Optimization**
+- No model routing - always uses the same model regardless of query complexity
+- No caching of tool results - repeated queries hit backends every time
+- No batching of similar requests
+- Simple queries ("who owns order-service?") use the same resources as complex diagnosis
+
+**Reliability**
+- No retry logic with exponential backoff for backend calls
+- No circuit breakers for failing backends
+- No rate limiting on the webhook endpoint
+- No dead letter queue for failed webhook processing
+
+**Observability**
+- No metrics on tool usage, latency, or error rates
+- No tracing of the agent loop
+- No cost tracking per diagnosis
+
+**Security**
+- Basic API key auth only - no OAuth, JWT, or RBAC
+- No audit logging of who ran what diagnosis
+- handler_url calls don't verify SSL certificates in dev mode
+
+**Scale**
+- Single Postgres instance for catalog
+- No connection pooling for handler_url calls
+- Webhook handler is synchronous (blocks on GitHub API + DB)
+
+These are solvable problems. The architecture supports them - they just aren't implemented yet.
 
 ## License
 
