@@ -43,45 +43,19 @@ github.com/acme/order-service/
 
 When merged to main, a GitHub webhook syncs it to the catalog. No manual registration needed.
 
-## Quick Start (Try It Out)
-
-```bash
-git clone https://github.com/subganapathy/oncall-assistant
-cd oncall-assistant
-npm install
-npm run build
-
-# Start mock resource API
-npx tsx scripts/mock-resource-api.ts
-
-# In another terminal, add to ~/.claude.json:
-{
-  "mcpServers": {
-    "oncall-assistant": {
-      "command": "node",
-      "args": ["/path/to/oncall-assistant/dist/index.js"],
-      "env": { "BACKEND_MODE": "mock" }
-    }
-  }
-}
-
-# Then
-claude
-> Debug ord-1234
-```
-
 ## Production Setup
 
-### 1. Deploy the Service
+### 1. Deploy the Assistant
 
 Deploy oncall-assistant to your infrastructure with env vars pointing to your backends:
 
 ```bash
+ANTHROPIC_API_KEY=sk-ant-...     # For Claude API calls
 DATABASE_URL=postgres://...      # Service catalog
 PROMETHEUS_URL=https://...       # Metrics
 OPENSEARCH_URL=https://...       # Logs
 KUBERNETES_API_URL=https://...   # K8s
-GITHUB_TOKEN=...                 # Deploy history
+GITHUB_TOKEN=...                 # Deploy history + webhook
 ```
 
 ### 2. Set Up GitHub Webhook
@@ -129,6 +103,35 @@ Engineers can use Claude CLI without local setup:
     }
   }
 }
+```
+
+## Quick Start (Try It Locally)
+
+Want to try it before deploying? Run with mock data:
+
+```bash
+git clone https://github.com/subganapathy/oncall-assistant
+cd oncall-assistant
+npm install
+npm run build
+
+# Start mock resource API
+npx tsx scripts/mock-resource-api.ts
+
+# In another terminal, add to ~/.claude.json:
+{
+  "mcpServers": {
+    "oncall-assistant": {
+      "command": "node",
+      "args": ["/path/to/oncall-assistant/dist/index.js"],
+      "env": { "BACKEND_MODE": "mock" }
+    }
+  }
+}
+
+# Then
+claude
+> Debug ord-1234
 ```
 
 ## The service.yaml Format
