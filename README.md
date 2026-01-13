@@ -105,35 +105,6 @@ Engineers can use Claude CLI without local setup:
 }
 ```
 
-## Quick Start (Try It Locally)
-
-Want to try it before deploying? Run with mock data:
-
-```bash
-git clone https://github.com/subganapathy/oncall-assistant
-cd oncall-assistant
-npm install
-npm run build
-
-# Start mock resource API
-npx tsx scripts/mock-resource-api.ts
-
-# In another terminal, add to ~/.claude.json:
-{
-  "mcpServers": {
-    "oncall-assistant": {
-      "command": "node",
-      "args": ["/path/to/oncall-assistant/dist/index.js"],
-      "env": { "BACKEND_MODE": "mock" }
-    }
-  }
-}
-
-# Then
-claude
-> Debug ord-1234
-```
-
 ## The service.yaml Format
 
 Each service defines its catalog entry:
@@ -183,7 +154,7 @@ When you say "Debug ord-1234":
 
 ## The BYO Resource Interface
 
-The killer feature: teams expose a simple REST endpoint, and the AI can debug any resource.
+Teams expose a simple REST endpoint, and the AI can debug any resource.
 
 **Step 1: Expose your resource API**
 
@@ -212,6 +183,35 @@ resources:
 ```
 
 That's it. No code changes to oncall-assistant needed.
+
+## Quick Start (Try It Locally)
+
+Want to try it before deploying? Run with mock data:
+
+```bash
+git clone https://github.com/subganapathy/oncall-assistant
+cd oncall-assistant
+npm install
+npm run build
+
+# Start mock resource API
+npx tsx scripts/mock-resource-api.ts
+
+# In another terminal, add to ~/.claude.json:
+{
+  "mcpServers": {
+    "oncall-assistant": {
+      "command": "node",
+      "args": ["/path/to/oncall-assistant/dist/index.js"],
+      "env": { "BACKEND_MODE": "mock" }
+    }
+  }
+}
+
+# Then
+claude
+> Debug ord-1234
+```
 
 ## Available Tools
 
