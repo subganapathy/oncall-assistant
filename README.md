@@ -16,6 +16,35 @@ The AI figures out which tools to use. You just describe the problem.
 - **Interactive**: Ask Claude "Debug ord-1234" via Claude Code → Claude calls tools → you get a diagnosis
 - **Automated**: Slack bot watches alert channels → auto-diagnoses when alerts fire → posts to thread
 
+### Slack Alert Example
+
+```
+#commerce-oncall
+
+🚨 PagerDuty [3:42 AM]
+FIRING: HighErrorRate for order-service in prod-us-east-1
+Error rate: 23.4% | Duration: 8 min
+"Connection refused to postgres-orders.rds.amazonaws.com:5432"
+
+    🤖 On-Call Assistant [3:42 AM]
+
+    Root Cause: AWS RDS outage (not your code)
+
+    Evidence:
+    • 847 connection failures in 4 minutes
+    • AWS Health: RDS connectivity issues in us-east-1 (ongoing)
+    • No recent deploys
+
+    Action:
+    • Check https://health.aws.amazon.com
+    • Consider regional failover
+    • This is NOT a rollback situation
+
+    Dashboard: https://grafana.internal/d/order-service
+```
+
+The agent correlates multiple signals: recent deploys, AWS health events, dependency status, log patterns, and live resource state via team-owned APIs.
+
 ## Core Concepts
 
 **Service** = A microservice in your infrastructure (order-service, user-service, auth-service)
