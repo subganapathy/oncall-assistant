@@ -1,277 +1,262 @@
 # On-Call Assistant
 
-AI-powered on-call assistant that automatically diagnoses incidents using Claude and MCP.
+An MCP server that gives Claude the tools to debug your services.
 
-## Architecture
+## What You Get
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                        SLACK                                    │
-│  Alert fires → Bot detects → Agent diagnoses → Posts response  │
-└─────────────────────────────────────────────────────────────────┘
-                              │
-                              ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                    AGENT LAYER                                  │
-│                                                                 │
-│  Slack Handler → Agent SDK → Claude → MCP Tools → Diagnosis   │
-│                                                                 │
-└─────────────────────────────────────────────────────────────────┘
-                              │
-                              ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                    MCP SERVER                                   │
-│                                                                 │
-│  Tools:                                                         │
-│  • get_service_catalog    • get_service_health                 │
-│  • get_dependencies       • get_recent_deploys                 │
-│  • get_escalation_path    • query_logs                         │
-│  • check_dependency_health • get_pod_status                    │
-│                                                                 │
-└─────────────────────────────────────────────────────────────────┘
-                              │
-                              ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                    DATA LAYER                                   │
-│                                                                 │
-│  PostgreSQL (Catalog) ← REST API ← GitHub Actions/ArgoCD       │
-│                                                                 │
-└─────────────────────────────────────────────────────────────────┘
-```
+Ask Claude things like:
+- "Debug ord-1234" → finds owner, checks health, queries logs, diagnoses
+- "Why is user-service slow?" → checks metrics, deploys, dependencies
+- "What broke?" → correlates alerts with recent changes
 
-## Quick Start
+The AI figures out which tools to use. You just describe the problem.
 
-### 1. Start the database
+## Setup (5 minutes)
+
+### 1. Install
 
 ```bash
-docker-compose up -d postgres
-```
-
-### 2. Run migrations and seed data
-
-```bash
+git clone https://github.com/subganapathy/oncall-assistant
+cd oncall-assistant
 npm install
-npm run db:migrate
-npm run db:seed
+npm run build
 ```
 
-### 3. Start the API server
+### 2. Add to Claude
 
-```bash
-npm run dev:api
-```
-
-### 4. Test with Claude CLI
-
-Register the MCP server in your Claude config (`~/.claude.json`):
+Add to your `~/.claude.json` under `projects`:
 
 ```json
 {
-  "mcpServers": {
-    "oncall-assistant": {
-      "command": "npx",
-      "args": ["tsx", "/path/to/oncall-assistant/src/index.ts"],
-      "env": {
-        "PGHOST": "localhost",
-        "PGPORT": "5432",
-        "PGDATABASE": "oncall",
-        "PGUSER": "oncall",
-        "PGPASSWORD": "oncall"
+  "projects": {
+    "/path/to/your/project": {
+      "mcpServers": {
+        "oncall-assistant": {
+          "command": "node",
+          "args": ["/path/to/oncall-assistant/dist/index.js"],
+          "env": {
+            "BACKEND_MODE": "mock"
+          }
+        }
       }
     }
   }
 }
 ```
 
-Then in Claude:
+Or create `.mcp.json` in your project directory:
 
-```
-> Check health of user-service
-> What services depend on auth-service?
-> Diagnose: user-service has high error rate
-```
-
-## Project Structure
-
-```
-oncall-assistant/
-├── src/
-│   ├── index.ts              # MCP server entry point
-│   ├── api/
-│   │   └── server.ts         # REST API for catalog management
-│   ├── handlers/
-│   │   └── slack.ts          # Slack bot + Agent SDK integration
-│   ├── tools/
-│   │   ├── catalog.ts        # Catalog query tools
-│   │   └── diagnostics.ts    # Health/logs/deploy tools
-│   └── lib/
-│       ├── types.ts          # TypeScript interfaces
-│       └── db.ts             # Database utilities
-├── scripts/
-│   ├── migrate.ts            # Database migrations
-│   └── seed.ts               # Test data seeding
-├── test/
-│   ├── setup.ts              # Test configuration
-│   └── unit/                 # Unit tests
-├── docker-compose.yml        # Local development services
-└── package.json
+```json
+{
+  "mcpServers": {
+    "oncall-assistant": {
+      "command": "node",
+      "args": ["/path/to/oncall-assistant/dist/index.js"],
+      "env": {
+        "BACKEND_MODE": "mock"
+      }
+    }
+  }
+}
 ```
 
-## Available Tools (MCP)
-
-| Tool | Description |
-|------|-------------|
-| `get_service_catalog` | Get full catalog entry for a service |
-| `list_services` | List all services (optionally by team) |
-| `get_dependencies` | Get what a service depends on |
-| `get_dependents` | Get what depends on a service |
-| `get_escalation_path` | Get pager alias and slack channel |
-| `get_service_health` | Get current metrics (error rate, latency) |
-| `get_recent_deploys` | Get recent deployments from ArgoCD |
-| `query_logs` | Search logs in OpenSearch |
-| `get_pod_status` | Get Kubernetes pod status |
-| `check_dependency_health` | Check health of all dependencies |
-
-## API Endpoints
-
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| GET | `/health` | Health check |
-| GET | `/api/services` | List all services |
-| GET | `/api/services/:name` | Get service by name |
-| POST | `/api/services` | Create service |
-| PATCH | `/api/services/:name` | Update service |
-| DELETE | `/api/services/:name` | Delete service |
-| POST | `/api/deployments` | Record deployment |
-| GET | `/api/deployments/:service` | Get deployments |
-| POST | `/webhooks/argocd` | ArgoCD webhook |
-| POST | `/webhooks/github` | GitHub webhook |
-
-## Usage Examples
-
-### Add a service via API
+### 3. Use It
 
 ```bash
-curl -X POST http://localhost:3000/api/services \
-  -H "Content-Type: application/json" \
-  -d '{
-    "name": "payment-service",
-    "team": "payments",
-    "slack_channel": "#payments-oncall",
-    "pager_alias": "payments-escalation",
-    "observability": {
-      "grafana_uid": "payment-service-prod",
-      "opensearch_index": "prod-payment-*"
-    },
-    "dependencies": [
-      {"name": "user-service", "type": "internal", "critical": true},
-      {"name": "stripe", "type": "external", "critical": true}
-    ]
-  }'
+claude  # start Claude in your project directory
 ```
 
-### Update dependencies via GitHub Actions
-
-```yaml
-# .github/workflows/update-catalog.yml
-name: Update Service Catalog
-on:
-  push:
-    paths:
-      - 'k8s/manifests/**'
-
-jobs:
-  update:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Update catalog
-        run: |
-          curl -X PATCH "${{ secrets.CATALOG_API_URL }}/api/services/my-service" \
-            -H "X-API-Key: ${{ secrets.CATALOG_API_KEY }}" \
-            -H "Content-Type: application/json" \
-            -d '{"dependencies": [...]}'
+Then:
+```
+> Debug ord-1234
+> Is user-service healthy?
+> What depends on auth-service?
 ```
 
-### Use with Claude CLI
+## Adding Your Services
+
+### Option 1: Service Catalog (in database)
+
+Each service needs an entry with:
+- **name** - service identifier
+- **team** - owning team
+- **slack_channel** - where to escalate
+- **dependencies** - what it depends on
+- **resources** - what resource patterns it owns (for BYO interface)
+
+```json
+{
+  "name": "order-service",
+  "team": "commerce",
+  "slack_channel": "#commerce-oncall",
+  "pager_alias": "commerce-escalation",
+  "description": "System of record for customer orders",
+  "dependencies": [
+    { "name": "user-service", "type": "internal", "critical": true },
+    { "name": "postgres-orders", "type": "database", "critical": true }
+  ],
+  "resources": [
+    {
+      "pattern": "ord-*",
+      "type": "order",
+      "description": "Customer order. Common issues: stuck in PENDING when inventory is slow."
+    }
+  ],
+  "observability": {
+    "grafana_uid": "order-service-prod",
+    "opensearch_index": "prod-order-*",
+    "prometheus_job": "order-service"
+  }
+}
+```
+
+### Option 2: Mock Mode (for testing)
+
+Set `BACKEND_MODE=mock` and edit `src/lib/db.ts` to add your services to `MOCK_SERVICES`.
+
+## The BYO Resource Interface
+
+The killer feature: when someone asks "debug ord-1234", the AI needs to know:
+1. Which service owns `ord-*` resources?
+2. What's the current status of this specific resource?
+
+### How It Works
+
+**Step 1: Declare ownership in catalog**
+
+Your service's catalog entry declares what resource patterns it owns:
+
+```json
+{
+  "name": "order-service",
+  "resources": [
+    {
+      "pattern": "ord-*",
+      "type": "order",
+      "description": "Customer order. Lifecycle: PENDING → PROCESSING → SHIPPED"
+    }
+  ]
+}
+```
+
+**Step 2: (Optional) Register a handler for live status**
+
+For real-time resource status, register a handler:
+
+```typescript
+import { resourceRegistry } from './lib/resources.js';
+
+resourceRegistry.register('ord-*', async (id) => {
+  // Query your database/API for live status
+  const order = await db.query('SELECT * FROM orders WHERE id = $1', [id]);
+
+  return {
+    id,
+    status: order.status,           // PENDING, PROCESSING, SHIPPED, etc.
+    created_at: order.created_at,
+    updated_at: order.updated_at,
+    // Include anything useful for debugging
+    customer_id: order.customer_id,
+    items: order.items,
+    // AI will use these to find the workload
+    namespace: `orders-${order.region}`,
+    cluster: `prod-${order.region}`,
+  };
+});
+```
+
+**What happens when you debug a resource:**
+
+1. AI calls `get_resource("ord-1234")`
+2. Registry finds handler for `ord-*` pattern
+3. Handler returns live status + context
+4. AI uses this to query logs, check pods, etc.
+
+**Without a handler:** Falls back to catalog info (ownership, description) but can't get live status.
+
+## Available Tools
+
+The AI has these tools and decides which to use:
+
+| Tool | What It Does |
+|------|--------------|
+| `get_service_catalog` | Full service info (team, deps, observability) |
+| `list_services` | All services, optionally by team |
+| `get_dependencies` | What a service depends on |
+| `get_dependents` | What depends on a service |
+| `get_escalation_path` | Slack channel, pager alias |
+| `get_resource` | **BYO interface** - resource status + owner context |
+| `find_resource_owner` | Quick lookup: who owns this resource? |
+| `get_service_health` | Error rate, latency, availability |
+| `get_recent_deploys` | Recent deployments (correlate with issues) |
+| `query_logs` | Search logs for errors |
+| `get_pod_status` | Kubernetes pod health |
+| `check_dependency_health` | Are upstream services healthy? |
+| `scan_log_patterns` | Find known error patterns (OOM, panics) |
+| `get_pod_logs` | Direct pod logs (for crashes) |
+| `check_aws_health` | AWS outages affecting your dependencies |
+| `check_runtime_metrics` | JVM/Go runtime metrics |
+
+## Connecting Real Backends
+
+For production, set these environment variables:
 
 ```bash
-# Start a conversation with the MCP server
-claude
+# Database (service catalog)
+DATABASE_URL=postgres://user:pass@host:5432/oncall
 
-# Ask about services
-> What team owns user-service?
-> Is user-service healthy right now?
-> Were there any recent deploys to user-service?
-> What would break if auth-service went down?
+# Metrics
+PROMETHEUS_URL=https://prometheus.internal
+
+# Logs
+OPENSEARCH_URL=https://opensearch.internal
+OPENSEARCH_USERNAME=...
+OPENSEARCH_PASSWORD=...
+
+# Kubernetes
+KUBERNETES_API_URL=https://kubernetes.internal
+KUBERNETES_TOKEN=...
+
+# GitHub (for deploy history)
+GITHUB_TOKEN=...
+
+# AWS (for health events)
+AWS_REGION=us-east-1
+```
+
+Then remove `BACKEND_MODE=mock` from your config.
+
+## Example Session
+
+```
+You: Debug ord-1234
+
+Claude: [calls get_resource, get_service_catalog, query_logs, get_recent_deploys, get_pod_status]
+
+I found the issue with ord-1234:
+
+**Owner:** order-service (commerce team)
+**Status:** PENDING (stuck for 45 minutes)
+
+**Root Cause:** Database connection failures started 15 minutes ago, correlating with deploy v2.3.4.
+
+**Evidence:**
+- Logs show "connection refused" errors
+- Pod order-service-xyz has 2 restarts
+- Deploy v2.3.4 ("Fix null pointer") was 15 min ago
+
+**Recommendation:**
+1. Check connection pool settings in v2.3.4
+2. Consider rollback to v2.3.3
+3. Contact #commerce-oncall if issues persist
 ```
 
 ## Development
 
-### Run tests
-
 ```bash
-npm test                    # Unit tests
-npm run test:watch          # Watch mode
-npm run test:integration    # Integration tests
-```
-
-### Type checking
-
-```bash
-npm run typecheck
-```
-
-### Build for production
-
-```bash
-npm run build
-```
-
-## Extending
-
-### Add a new tool
-
-1. Create the tool function in `src/tools/`:
-
-```typescript
-// src/tools/mytool.ts
-export const myToolSchema = {
-    service: z.string().describe("Service name"),
-};
-
-export async function myTool(input: { service: string }): Promise<string> {
-    // Implementation
-    return JSON.stringify({ result: "..." });
-}
-```
-
-2. Register it in `src/index.ts`:
-
-```typescript
-import { myTool, myToolSchema } from "./tools/mytool.js";
-
-server.tool(
-    "my_tool",
-    "Description of what this tool does",
-    myToolSchema,
-    async (input) => ({
-        content: [{ type: "text", text: await myTool(input) }],
-    })
-);
-```
-
-### Connect real backends
-
-Replace the mock implementations in `src/tools/diagnostics.ts`:
-
-```typescript
-// Instead of mock data, call real Prometheus:
-export async function getServiceHealth(input: { service: string }) {
-    const promQL = `sum(rate(http_requests_total{service="${input.service}"}[5m]))`;
-    const result = await fetch(`${PROMETHEUS_URL}/api/v1/query?query=${encodeURIComponent(promQL)}`);
-    // ... process result
-}
+npm test          # run tests
+npm run build     # compile typescript
+npm run dev       # watch mode
 ```
 
 ## License
