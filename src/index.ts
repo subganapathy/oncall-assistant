@@ -238,45 +238,21 @@ server.resource(
 
 server.prompt(
     "diagnose-incident",
-    "Full incident diagnosis workflow",
+    "Diagnose an incident from an alert",
     {
         service: z.string().describe("Service experiencing the incident"),
         alert_name: z.string().describe("Name of the alert that fired"),
-        alert_message: z.string().describe("Alert message/details"),
-        cluster: z.string().describe("Kubernetes cluster where the alert fired"),
+        alert_message: z.string().optional().describe("Alert message/details"),
+        cluster: z.string().optional().describe("Kubernetes cluster"),
     },
     async ({ service, alert_name, alert_message, cluster }) => ({
         messages: [{
             role: "user",
             content: {
                 type: "text",
-                text: `You are an on-call assistant. An alert has fired:
+                text: `Alert fired on ${service}: ${alert_name}${alert_message ? `\nMessage: ${alert_message}` : ""}${cluster ? `\nCluster: ${cluster}` : ""}
 
-SERVICE: ${service}
-ALERT: ${alert_name}
-MESSAGE: ${alert_message}
-CLUSTER: ${cluster}
-
-Please diagnose this incident by following these steps:
-
-1. **Get Context**: Use get_service_catalog to understand the service (team, dependencies, language)
-2. **Check Health**: Use get_service_health for current metrics (error rate, latency, availability)
-3. **AWS Outage Check**: Use check_aws_health to see if AWS has an active outage affecting dependencies
-4. **Recent Changes**: Use get_recent_deploys to check for recent deployments (correlation!)
-5. **Dependencies**: Use check_dependency_health to see if upstream services/AWS resources are the cause
-6. **Log Pattern Scan**: Use scan_log_patterns to find language-specific errors (OOM, panics, etc.)
-7. **Pod Status**: Use get_pod_status to check Kubernetes state (restarts, crashes)
-8. **Pod Logs**: If pods are crashing, use get_pod_logs with previous=true to get crash output
-9. **Runtime Metrics**: Use check_runtime_metrics to verify observability is properly configured
-
-Based on your findings, provide:
-- **Severity**: P0/P1/P2/P3
-- **Root Cause Hypothesis**: What you think caused this
-- **Evidence**: What data supports your hypothesis
-- **Recommended Actions**: What should be done
-- **Escalation**: Should we page someone?
-
-Be systematic and thorough.`,
+Diagnose and recommend actions.`,
             },
         }],
     })
@@ -284,31 +260,17 @@ Be systematic and thorough.`,
 
 server.prompt(
     "verify-deployment",
-    "Post-deployment verification",
+    "Verify a deployment is healthy",
     {
         service: z.string().describe("Service that was deployed"),
-        version: z.string().describe("Version deployed"),
-        cluster: z.string().describe("Kubernetes cluster"),
+        version: z.string().optional().describe("Version deployed"),
     },
-    async ({ service, version, cluster }) => ({
+    async ({ service, version }) => ({
         messages: [{
             role: "user",
             content: {
                 type: "text",
-                text: `I just deployed ${service} version ${version} to ${cluster}.
-
-Please verify the deployment is healthy:
-
-1. Use get_service_health to check error rate and latency
-2. Use scan_log_patterns since="5m" to check for new error patterns
-3. Use get_pod_status to verify pods are running (no restarts)
-4. Use check_dependency_health to verify dependencies are ok
-5. Use check_runtime_metrics to verify runtime metrics are being published
-
-Report:
-- Is the deployment healthy? (YES/NO)
-- Any concerning metrics or logs?
-- Any action needed?`,
+                text: `Verify ${service}${version ? ` ${version}` : ""} deployment is healthy.`,
             },
         }],
     })
@@ -316,56 +278,17 @@ Report:
 
 server.prompt(
     "debug-stuck-resource",
-    "Debug a stuck or failing resource (provisioning, order, etc.)",
+    "Debug a stuck resource",
     {
-        resource_id: z.string().describe("Resource ID that's stuck (e.g., 'ord-1234', 'res-5678')"),
-        symptom: z.string().optional().describe("What's the symptom? (e.g., 'stuck in PENDING', 'pods crashing')"),
+        resource_id: z.string().describe("Resource ID (e.g., 'ord-1234')"),
+        symptom: z.string().optional().describe("Symptom if known"),
     },
     async ({ resource_id, symptom }) => ({
         messages: [{
             role: "user",
             content: {
                 type: "text",
-                text: `Debug this stuck resource:
-
-RESOURCE ID: ${resource_id}
-SYMPTOM: ${symptom || "Unknown - please investigate"}
-
-Follow these steps:
-
-1. **Get Resource Status**: Use get_resource to get current status and owner service
-   - AI will interpret the semi-structured response
-   - Look for workload location (namespace, cluster) in the response
-
-2. **Understand Context**: From the resource response, identify:
-   - Which service is the system of record
-   - What dependencies the owner service has
-   - Where the workload should be running
-
-3. **Check Owner Service**: Use get_service_catalog on the owner service
-   - Understand its dependencies
-   - Check its observability config
-
-4. **Search for Evidence**:
-   - Use query_logs to search for the resource_id across relevant services
-   - Check which services have seen this resource and which haven't
-   - The gap tells you where it's stuck
-
-5. **Check Dependencies**: For each dependency of the owner service:
-   - Use get_service_health to check if it's healthy
-   - Look for the resource_id in dependency logs
-
-6. **If Workload Exists**:
-   - Use get_pod_status to check pod health
-   - Use get_pod_logs if pods are crashing
-   - Use scan_log_patterns for language-specific errors
-
-Report:
-- **Current State**: Where is the resource in its lifecycle?
-- **Stuck At**: Which service/step is it blocked on?
-- **Root Cause**: What's preventing progress?
-- **Action**: What should be done to unblock?
-- **Owner**: Who should be contacted?`,
+                text: `Debug ${resource_id}${symptom ? ` - ${symptom}` : ""}`,
             },
         }],
     })
