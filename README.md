@@ -26,7 +26,7 @@ The AI figures out which tools to use. You just describe the problem.
 - Where to find logs and metrics (Grafana, OpenSearch, Prometheus)
 - What resources it manages
 
-**Resource** = Something a service creates and owns (ord-1234, usr-5678). When you say "debug ord-1234", the AI looks up which service owns `ord-*` pattern resources, then investigates that service.
+**Resource** = Something a service is the system of record for (ord-1234, usr-5678). When you say "debug ord-1234", the AI looks up which service is authoritative for `ord-*` resources, then investigates that service.
 
 The AI uses the service catalog to understand your infrastructure. Without it, Claude has no idea what "order-service" is or where to look for logs.
 
