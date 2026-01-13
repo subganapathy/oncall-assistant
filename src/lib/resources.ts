@@ -210,6 +210,7 @@ export async function getResourceTypeInfo(id: string): Promise<{
     pattern: string;
     description: string;
     ownerService: string;
+    handler_url?: string;
 } | null> {
     const services = await query<ServiceCatalog>(
         `SELECT name, resources FROM services WHERE resources IS NOT NULL`
@@ -224,6 +225,7 @@ export async function getResourceTypeInfo(id: string): Promise<{
                         pattern: resource.pattern,
                         description: resource.description,
                         ownerService: service.name,
+                        handler_url: resource.handler_url,
                     };
                 }
             }

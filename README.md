@@ -11,168 +11,184 @@ Ask Claude things like:
 
 The AI figures out which tools to use. You just describe the problem.
 
-## Setup (5 minutes)
+## Two Interfaces
 
-### 1. Install
+| Interface | How It Works |
+|-----------|--------------|
+| **Claude CLI** | Engineer types "Debug ord-1234" → Claude calls tools → diagnosis |
+| **Slack Bot** | Alert fires → bot auto-diagnoses → posts to thread |
+
+Both share the same backend: service catalog, resource handlers, observability.
+
+## Quick Start (Try It Out)
 
 ```bash
 git clone https://github.com/subganapathy/oncall-assistant
 cd oncall-assistant
 npm install
 npm run build
-```
 
-### 2. Add to Claude
+# Start mock resource API
+npx tsx scripts/mock-resource-api.ts
 
-Add to your `~/.claude.json` under `projects`:
-
-```json
-{
-  "projects": {
-    "/path/to/your/project": {
-      "mcpServers": {
-        "oncall-assistant": {
-          "command": "node",
-          "args": ["/path/to/oncall-assistant/dist/index.js"],
-          "env": {
-            "BACKEND_MODE": "mock"
-          }
-        }
-      }
-    }
-  }
-}
-```
-
-Or create `.mcp.json` in your project directory:
-
-```json
+# In another terminal, add to ~/.claude.json:
 {
   "mcpServers": {
     "oncall-assistant": {
       "command": "node",
       "args": ["/path/to/oncall-assistant/dist/index.js"],
-      "env": {
-        "BACKEND_MODE": "mock"
-      }
+      "env": { "BACKEND_MODE": "mock" }
     }
   }
 }
+
+# Then
+claude
+> Debug ord-1234
 ```
 
-### 3. Use It
+## Production Setup
+
+### 1. Deploy the Service
+
+Deploy oncall-assistant to your infrastructure with env vars pointing to your backends:
 
 ```bash
-claude  # start Claude in your project directory
+DATABASE_URL=postgres://...      # Service catalog
+PROMETHEUS_URL=https://...       # Metrics
+OPENSEARCH_URL=https://...       # Logs
+KUBERNETES_API_URL=https://...   # K8s
+GITHUB_TOKEN=...                 # Deploy history
 ```
 
-Then:
+### 2. Register Services via GitHub App
+
+Set up a GitHub App (or org-level webhook) that fires on push to main. When a team adds `service.yaml` to their repo, the webhook syncs it to the catalog.
+
+**One-time setup (platform team):**
+1. Create GitHub App or org webhook
+2. Point at `https://oncall-assistant.internal/webhooks/github`
+
+**Per-service setup (service team):**
+1. Add `service.yaml` to repo root
+2. Merge to main
+3. Done - service appears in catalog
+
+### 3. Connect Slack
+
+Create a Slack app with:
+- Bot token scopes: `chat:write`, `channels:history`, `commands`
+- Slash command: `/diagnose`
+- Event subscription for messages
+
+```bash
+SLACK_BOT_TOKEN=xoxb-...
+SLACK_SIGNING_SECRET=...
+SLACK_APP_TOKEN=xapp-...
 ```
-> Debug ord-1234
-> Is user-service healthy?
-> What depends on auth-service?
-```
 
-## Adding Your Services
+Invite the bot to alert channels. It will:
+- Auto-respond to messages containing "FIRING" or "alert"
+- Support `/diagnose service-name` from anywhere
 
-### Option 1: Service Catalog (in database)
+### 4. Claude CLI (Remote)
 
-Each service needs an entry with:
-- **name** - service identifier
-- **team** - owning team
-- **slack_channel** - where to escalate
-- **dependencies** - what it depends on
-- **resources** - what resource patterns it owns (for BYO interface)
+Engineers can use Claude CLI without local setup:
 
 ```json
 {
-  "name": "order-service",
-  "team": "commerce",
-  "slack_channel": "#commerce-oncall",
-  "pager_alias": "commerce-escalation",
-  "description": "System of record for customer orders",
-  "dependencies": [
-    { "name": "user-service", "type": "internal", "critical": true },
-    { "name": "postgres-orders", "type": "database", "critical": true }
-  ],
-  "resources": [
-    {
-      "pattern": "ord-*",
-      "type": "order",
-      "description": "Customer order. Common issues: stuck in PENDING when inventory is slow."
+  "mcpServers": {
+    "oncall-assistant": {
+      "url": "https://oncall-assistant.company.com/mcp",
+      "headers": { "Authorization": "Bearer ${ONCALL_TOKEN}" }
     }
-  ],
-  "observability": {
-    "grafana_uid": "order-service-prod",
-    "opensearch_index": "prod-order-*",
-    "prometheus_job": "order-service"
   }
 }
 ```
 
-### Option 2: Mock Mode (for testing)
+## The service.yaml Format
 
-Set `BACKEND_MODE=mock` and edit `src/lib/db.ts` to add your services to `MOCK_SERVICES`.
+Each service defines its catalog entry:
+
+```yaml
+name: order-service
+team: commerce
+slack_channel: "#commerce-oncall"
+pager_alias: commerce-escalation
+description: "System of record for customer orders"
+
+dependencies:
+  - name: user-service
+    type: internal
+    critical: true
+  - name: postgres-orders
+    type: database
+    aws_hosted: true          # RDS - check AWS Health during incidents
+  - name: redis-cache
+    type: database
+    aws_hosted: false         # Self-hosted
+
+# Resources this service is the system of record for.
+# Only include resources that this service creates/owns.
+# Do NOT include resources you just read/use from other services.
+resources:
+  - pattern: "ord-*"
+    type: order
+    description: "Customer order"
+    handler_url: "https://order-service.internal/api/resources/${id}"
+
+observability:
+  grafana_uid: order-service-prod
+  opensearch_index: prod-order-*
+  prometheus_job: order-service
+```
+
+## Understanding Resources vs Services
+
+This is important:
+
+- **Service** = the code that runs (order-service, user-service)
+- **Resource** = the things a service creates/owns (ord-1234, usr-5678)
+
+When you say "Debug ord-1234":
+1. AI finds which service owns `ord-*` pattern → order-service
+2. AI calls `handler_url` to get live status → PENDING, error: "DB timeout"
+3. AI checks order-service's dependencies, logs, pods
+4. AI diagnoses the issue
+
+**Only list resources your service is the system of record for.** If order-service reads from user-service, don't list `usr-*` in order-service's resources.
 
 ## The BYO Resource Interface
 
-The killer feature: when someone asks "debug ord-1234", the AI needs to know:
-1. Which service owns `ord-*` resources?
-2. What's the current status of this specific resource?
+The killer feature: teams expose a simple REST endpoint, and the AI can debug any resource.
 
-### How It Works
+**Step 1: Expose your resource API**
 
-**Step 1: Declare ownership in catalog**
-
-Your service's catalog entry declares what resource patterns it owns:
-
-```json
+```
+GET /api/resources/ord-1234
 {
-  "name": "order-service",
-  "resources": [
-    {
-      "pattern": "ord-*",
-      "type": "order",
-      "description": "Customer order. Lifecycle: PENDING → PROCESSING → SHIPPED"
-    }
-  ]
+  "id": "ord-1234",
+  "status": "PENDING",
+  "created_at": "2024-01-10T10:00:00Z",
+  "customer_id": "cust-789",
+  "namespace": "orders-us-east",
+  "cluster": "prod-us-east-1",
+  "error": "Database connection timeout after 30s"
 }
 ```
 
-**Step 2: (Optional) Register a handler for live status**
+Return whatever is useful for debugging. The AI will interpret it.
 
-For real-time resource status, register a handler:
+**Step 2: Add handler_url to service.yaml**
 
-```typescript
-import { resourceRegistry } from './lib/resources.js';
-
-resourceRegistry.register('ord-*', async (id) => {
-  // Query your database/API for live status
-  const order = await db.query('SELECT * FROM orders WHERE id = $1', [id]);
-
-  return {
-    id,
-    status: order.status,           // PENDING, PROCESSING, SHIPPED, etc.
-    created_at: order.created_at,
-    updated_at: order.updated_at,
-    // Include anything useful for debugging
-    customer_id: order.customer_id,
-    items: order.items,
-    // AI will use these to find the workload
-    namespace: `orders-${order.region}`,
-    cluster: `prod-${order.region}`,
-  };
-});
+```yaml
+resources:
+  - pattern: "ord-*"
+    type: order
+    handler_url: "https://order-service.internal/api/resources/${id}"
 ```
 
-**What happens when you debug a resource:**
-
-1. AI calls `get_resource("ord-1234")`
-2. Registry finds handler for `ord-*` pattern
-3. Handler returns live status + context
-4. AI uses this to query logs, check pods, etc.
-
-**Without a handler:** Falls back to catalog info (ownership, description) but can't get live status.
+That's it. No code changes to oncall-assistant needed.
 
 ## Available Tools
 
@@ -197,58 +213,45 @@ The AI has these tools and decides which to use:
 | `check_aws_health` | AWS outages affecting your dependencies |
 | `check_runtime_metrics` | JVM/Go runtime metrics |
 
-## Connecting Real Backends
+## Testing
 
-For production, set these environment variables:
+### Mock Mode
 
 ```bash
-# Database (service catalog)
-DATABASE_URL=postgres://user:pass@host:5432/oncall
+# Start mock resource API
+npx tsx scripts/mock-resource-api.ts
 
-# Metrics
-PROMETHEUS_URL=https://prometheus.internal
-
-# Logs
-OPENSEARCH_URL=https://opensearch.internal
-OPENSEARCH_USERNAME=...
-OPENSEARCH_PASSWORD=...
-
-# Kubernetes
-KUBERNETES_API_URL=https://kubernetes.internal
-KUBERNETES_TOKEN=...
-
-# GitHub (for deploy history)
-GITHUB_TOKEN=...
-
-# AWS (for health events)
-AWS_REGION=us-east-1
+# Available test resources:
+#   - ord-1234 (PENDING, DB timeout error)
+#   - usr-1234 (ACTIVE)
+#   - tok-abc123 (VALID)
+#   - sess-xyz789 (ACTIVE)
 ```
 
-Then remove `BACKEND_MODE=mock` from your config.
+### E2E Agent Test
 
-## Example Session
+Test the full agentic loop (Claude calling tools iteratively):
 
+```bash
+ANTHROPIC_API_KEY=... npx tsx scripts/test-e2e-agent.ts ord-1234
 ```
-You: Debug ord-1234
 
-Claude: [calls get_resource, get_service_catalog, query_logs, get_recent_deploys, get_pod_status]
+Output:
+```
+--- Iteration 1 ---
+  [Tool] get_resource({"resource_id":"ord-1234"})
 
-I found the issue with ord-1234:
+--- Iteration 2 ---
+  [Tool] get_dependencies({"service":"order-service"})
 
-**Owner:** order-service (commerce team)
-**Status:** PENDING (stuck for 45 minutes)
+--- Iteration 3 ---
+  Stop reason: end_turn
 
-**Root Cause:** Database connection failures started 15 minutes ago, correlating with deploy v2.3.4.
-
-**Evidence:**
-- Logs show "connection refused" errors
-- Pod order-service-xyz has 2 restarts
-- Deploy v2.3.4 ("Fix null pointer") was 15 min ago
-
-**Recommendation:**
-1. Check connection pool settings in v2.3.4
-2. Consider rollback to v2.3.3
-3. Contact #commerce-oncall if issues persist
+## Diagnosis for ord-1234
+- Status: PENDING (stuck for 30+ minutes)
+- Error: Database connection timeout
+- Root Cause: Database connectivity problems
+- Action: Check database health, verify connection pool
 ```
 
 ## Development

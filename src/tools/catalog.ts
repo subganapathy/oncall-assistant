@@ -242,11 +242,40 @@ export async function getResource(
 ): Promise<string> {
     const { resource_id, include_context = true } = input;
 
-    // Get resource info from registered handler or catalog fallback
-    const resourceInfo = await resourceRegistry.get(resource_id);
-
-    // Get type info from catalog
+    // Get type info from catalog (includes handler_url if configured)
     const typeInfo = await getResourceTypeInfo(resource_id);
+
+    // Try to get live resource status
+    let resourceInfo = null;
+    let handlerError = null;
+
+    // 1. First, try handler_url if configured in catalog
+    if (typeInfo?.handler_url) {
+        const url = typeInfo.handler_url.replace("${id}", resource_id);
+        try {
+            const response = await fetch(url, {
+                headers: { "Accept": "application/json" },
+                signal: AbortSignal.timeout(5000), // 5s timeout
+            });
+            if (response.ok) {
+                const data = await response.json() as Record<string, unknown>;
+                resourceInfo = {
+                    id: resource_id,
+                    status: (data.status as string) || "unknown",
+                    ...data,
+                };
+            } else {
+                handlerError = `Handler returned ${response.status}`;
+            }
+        } catch (error) {
+            handlerError = error instanceof Error ? error.message : "Handler call failed";
+        }
+    }
+
+    // 2. Fall back to registered handler or catalog lookup
+    if (!resourceInfo) {
+        resourceInfo = await resourceRegistry.get(resource_id);
+    }
 
     // Build response
     const response: Record<string, unknown> = {
@@ -258,6 +287,9 @@ export async function getResource(
         response.resource_pattern = typeInfo.pattern;
         response.resource_description = typeInfo.description;
         response.owner_service = typeInfo.ownerService;
+        if (typeInfo.handler_url) {
+            response.handler_url = typeInfo.handler_url.replace("${id}", resource_id);
+        }
     }
 
     if (resourceInfo) {
@@ -265,6 +297,9 @@ export async function getResource(
         response.resource_data = resourceInfo;
     } else {
         response.status = "not_found";
+        if (handlerError) {
+            response.handler_error = handlerError;
+        }
         response.note = "No handler registered and resource ID doesn't match any catalog patterns. " +
                        "Either the resource doesn't exist or the owning service hasn't registered a handler.";
     }

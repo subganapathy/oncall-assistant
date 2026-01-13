@@ -152,6 +152,9 @@ export interface ResourceEntry {
                                    // e.g., "Models a customer order. May spawn fulfillment
                                    // workloads on data plane. Common issues: stuck in PENDING
                                    // when inventory service is slow."
+    handler_url?: string;          // Optional URL to fetch live resource status
+                                   // e.g., "https://orders-api.internal/resources/${id}"
+                                   // ${id} is replaced with the actual resource ID
 }
 
 /**
