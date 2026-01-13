@@ -20,6 +20,19 @@ The AI figures out which tools to use. You just describe the problem.
 
 Both share the same backend: service catalog, resource handlers, observability.
 
+## How Services Get Registered
+
+Every service team adds a `service.yaml` to their repo:
+
+```
+github.com/acme/order-service/
+├── src/
+├── deploy/
+└── service.yaml    ← defines this service in the catalog
+```
+
+When merged to main, a GitHub webhook syncs it to the catalog. No manual registration needed.
+
 ## Quick Start (Try It Out)
 
 ```bash
@@ -61,18 +74,20 @@ KUBERNETES_API_URL=https://...   # K8s
 GITHUB_TOKEN=...                 # Deploy history
 ```
 
-### 2. Register Services via GitHub App
+### 2. Set Up GitHub Webhook
 
-Set up a GitHub App (or org-level webhook) that fires on push to main. When a team adds `service.yaml` to their repo, the webhook syncs it to the catalog.
+Set up a GitHub App (or org-level webhook) that fires on push to main.
 
 **One-time setup (platform team):**
 1. Create GitHub App or org webhook
 2. Point at `https://oncall-assistant.internal/webhooks/github`
 
-**Per-service setup (service team):**
-1. Add `service.yaml` to repo root
+**Per-service setup (each service team):**
+1. Create `service.yaml` in their repo root (see format below)
 2. Merge to main
-3. Done - service appears in catalog
+3. Done - service appears in catalog automatically
+
+This is the key step for service teams. Without `service.yaml`, the on-call assistant doesn't know about their service.
 
 ### 3. Connect Slack
 
