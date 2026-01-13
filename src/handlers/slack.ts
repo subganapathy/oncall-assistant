@@ -154,59 +154,15 @@ function buildDiagnosticPrompt(
     alert: Partial<Alert>,
     context: ServiceCatalog
 ): string {
-    return `You are an expert on-call assistant. An alert has fired and you need to diagnose it.
+    const deps = context.dependencies?.map(d => d.name).join(", ") || "none";
 
-## ALERT DETAILS
-- **Service**: ${alert.service}
-- **Alert Name**: ${alert.name}
-- **Severity**: ${alert.severity}
-- **Message**: ${alert.message}
-- **Fired At**: ${alert.fired_at?.toISOString()}
+    return `Alert fired on ${alert.service}: ${alert.name}
+Severity: ${alert.severity}
+Message: ${alert.message}
+Team: ${context.team} (${context.slack_channel})
+Dependencies: ${deps}
 
-## SERVICE CONTEXT
-- **Team**: ${context.team}
-- **Slack Channel**: ${context.slack_channel}
-- **Pager Alias**: ${context.pager_alias}
-- **Dependencies**: ${context.dependencies.map(d => `${d.name} (${d.type}, critical: ${d.critical})`).join(", ")}
-- **Grafana Dashboard**: ${context.observability.grafana_uid}
-- **Log Index**: ${context.observability.opensearch_index}
-- **Runbook Path**: ${context.runbook_path}
-
-## YOUR TASK
-Diagnose this incident by analyzing:
-1. **Health Metrics**: Is the service actually unhealthy? (error rate, latency, availability)
-2. **Recent Deployments**: Was there a deploy in the last hour?
-3. **Dependencies**: Are upstream services healthy?
-4. **Logs**: What errors are appearing?
-5. **Pod Status**: Are pods running normally?
-
-## OUTPUT FORMAT
-Provide your diagnosis in this format:
-
-### Severity Assessment
-[P0/P1/P2/P3] - [One line explanation]
-
-### Root Cause Hypothesis
-[What you think caused this and why, with confidence level]
-
-### Evidence
-- [Observation 1]
-- [Observation 2]
-- [...]
-
-### Recommended Actions
-1. [Action 1] - [Reason]
-2. [Action 2] - [Reason]
-
-### Escalation
-[Should we page ${context.pager_alias}? Yes/No and why]
-
-### Useful Links
-- Dashboard: https://grafana.company.io/d/${context.observability.grafana_uid}
-- Logs: https://opensearch.company.io/app/discover#/?index=${context.observability.opensearch_index}
-- Runbook: ${context.runbook_path}
-
-Be concise but thorough. The on-call engineer is reading this at 3am.`;
+Diagnose and recommend actions. Be concise - this is for an on-call engineer at 3am.`;
 }
 
 // ─────────────────────────────────────────────────────────────
