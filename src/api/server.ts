@@ -12,6 +12,7 @@
 
 import express, { Request, Response, NextFunction } from "express";
 import crypto from "crypto";
+import YAML from "yaml";
 import { query, queryOne, execute, checkHealth, close } from "../lib/db.js";
 import { backends } from "../lib/backends/index.js";
 import type { ServiceCatalog } from "../lib/types.js";
@@ -289,6 +290,127 @@ app.get("/api/deployments/:service", asyncHandler(async (req, res) => {
 // ─────────────────────────────────────────────────────────────
 
 /**
+ * Fetch service.yaml from a GitHub repository.
+ * Uses GitHub API to get raw file contents.
+ */
+async function fetchServiceYaml(repoFullName: string): Promise<Partial<ServiceCatalog> | null> {
+    const token = process.env.GITHUB_TOKEN;
+    if (!token) {
+        console.error("[GitHub] No GITHUB_TOKEN set, cannot fetch service.yaml");
+        return null;
+    }
+
+    const url = `https://api.github.com/repos/${repoFullName}/contents/service.yaml`;
+
+    try {
+        const response = await fetch(url, {
+            headers: {
+                "Authorization": `Bearer ${token}`,
+                "Accept": "application/vnd.github.raw+json",
+                "X-GitHub-Api-Version": "2022-11-28",
+            },
+        });
+
+        if (!response.ok) {
+            if (response.status === 404) {
+                console.log(`[GitHub] service.yaml not found in ${repoFullName}`);
+                return null;
+            }
+            console.error(`[GitHub] Failed to fetch service.yaml: ${response.status}`);
+            return null;
+        }
+
+        const content = await response.text();
+        const parsed = YAML.parse(content) as Partial<ServiceCatalog>;
+
+        // Add github_repo if not set
+        if (!parsed.github_repo && !parsed.deployment?.repo) {
+            parsed.github_repo = `github.com/${repoFullName}`;
+        }
+
+        return parsed;
+    } catch (error) {
+        console.error(`[GitHub] Error fetching service.yaml:`, error);
+        return null;
+    }
+}
+
+/**
+ * Insert or update a service in the catalog.
+ */
+async function upsertService(config: Partial<ServiceCatalog>): Promise<void> {
+    if (!config.name) {
+        console.error("[Catalog] Cannot upsert service without name");
+        return;
+    }
+
+    // Check if service exists
+    const existing = await queryOne<ServiceCatalog>(
+        "SELECT name FROM services WHERE name = $1",
+        [config.name]
+    );
+
+    if (existing) {
+        // Update existing service
+        console.log(`[Catalog] Updating service: ${config.name}`);
+        await execute(
+            `UPDATE services SET
+                team = COALESCE($2, team),
+                description = COALESCE($3, description),
+                slack_channel = COALESCE($4, slack_channel),
+                pager_alias = COALESCE($5, pager_alias),
+                observability = COALESCE($6, observability),
+                dependencies = COALESCE($7, dependencies),
+                deployment = COALESCE($8, deployment),
+                automation = COALESCE($9, automation),
+                runbook_path = COALESCE($10, runbook_path),
+                resources = COALESCE($11, resources),
+                language = COALESCE($12, language),
+                updated_at = NOW()
+            WHERE name = $1`,
+            [
+                config.name,
+                config.team,
+                config.description,
+                config.slack_channel,
+                config.pager_alias,
+                config.observability ? JSON.stringify(config.observability) : null,
+                config.dependencies ? JSON.stringify(config.dependencies) : null,
+                config.deployment ? JSON.stringify(config.deployment) : null,
+                config.automation ? JSON.stringify(config.automation) : null,
+                config.runbook_path,
+                config.resources ? JSON.stringify(config.resources) : null,
+                config.language,
+            ]
+        );
+    } else {
+        // Insert new service
+        console.log(`[Catalog] Creating service: ${config.name}`);
+        await execute(
+            `INSERT INTO services (
+                name, team, description, slack_channel, pager_alias,
+                observability, dependencies, deployment, automation,
+                runbook_path, resources, language, created_at, updated_at
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NOW(), NOW())`,
+            [
+                config.name,
+                config.team || "unknown",
+                config.description || "",
+                config.slack_channel || "#unknown",
+                config.pager_alias || "",
+                JSON.stringify(config.observability || {}),
+                JSON.stringify(config.dependencies || []),
+                JSON.stringify(config.deployment || {}),
+                JSON.stringify(config.automation || { allowed_actions: [], requires_approval: [] }),
+                config.runbook_path || "",
+                JSON.stringify(config.resources || []),
+                config.language || "unknown",
+            ]
+        );
+    }
+}
+
+/**
  * POST /webhooks/github
  * Handle GitHub webhooks when service.yaml changes.
  *
@@ -325,25 +447,53 @@ app.post("/webhooks/github", asyncHandler(async (req, res) => {
 
     // Handle push events (when service.yaml changes on main)
     if (event === "push" && payload.ref === "refs/heads/main") {
-        // Check if service.yaml was modified
+        // Check if service.yaml was modified or added
         const commits = payload.commits || [];
         const serviceYamlChanged = commits.some((commit: { modified?: string[]; added?: string[] }) =>
             commit.modified?.includes("service.yaml") ||
             commit.added?.includes("service.yaml")
         );
 
-        if (serviceYamlChanged) {
-            console.log(`  service.yaml changed in ${payload.repository?.full_name}`);
+        // Check if service.yaml was deleted
+        const serviceYamlDeleted = commits.some((commit: { removed?: string[] }) =>
+            commit.removed?.includes("service.yaml")
+        );
 
-            // In production: fetch service.yaml from GitHub API and upsert to catalog
-            // const serviceConfig = await fetchServiceYaml(payload.repository.full_name);
-            // await upsertService(serviceConfig);
-
+        if (serviceYamlDeleted) {
+            console.log(`[GitHub Webhook] service.yaml deleted in ${payload.repository?.full_name}`);
+            // Optionally: mark service as inactive or delete from catalog
             res.json({
                 received: true,
-                action: "catalog_update_triggered",
+                action: "service_yaml_deleted",
                 repo: payload.repository?.full_name,
+                note: "Service not removed from catalog (manual cleanup required)",
             });
+            return;
+        }
+
+        if (serviceYamlChanged) {
+            const repoFullName = payload.repository?.full_name;
+            console.log(`[GitHub Webhook] service.yaml changed in ${repoFullName}`);
+
+            // Fetch and upsert the service
+            const serviceConfig = await fetchServiceYaml(repoFullName);
+
+            if (serviceConfig) {
+                await upsertService(serviceConfig);
+                res.json({
+                    received: true,
+                    action: "catalog_updated",
+                    repo: repoFullName,
+                    service: serviceConfig.name,
+                });
+            } else {
+                res.json({
+                    received: true,
+                    action: "fetch_failed",
+                    repo: repoFullName,
+                    error: "Could not fetch or parse service.yaml",
+                });
+            }
             return;
         }
     }

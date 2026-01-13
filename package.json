@@ -25,6 +25,7 @@
     "@slack/bolt": "^3.17.0",
     "express": "^4.18.2",
     "pg": "^8.11.3",
+    "yaml": "^2.8.2",
     "zod": "^3.22.4"
   },
   "devDependencies": {

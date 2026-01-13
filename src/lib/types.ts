@@ -111,6 +111,8 @@ export interface DatabaseDependency {
     name: string;                  // e.g., "postgres-users"
     type: "database";
     critical: boolean;
+    aws_hosted?: boolean;          // true = RDS/ElastiCache (check AWS Health)
+                                   // false = self-hosted
 }
 
 /**
