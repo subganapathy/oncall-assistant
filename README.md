@@ -16,6 +16,20 @@ The AI figures out which tools to use. You just describe the problem.
 - **Interactive**: Ask Claude "Debug ord-1234" via Claude Code → Claude calls tools → you get a diagnosis
 - **Automated**: Slack bot watches alert channels → auto-diagnoses when alerts fire → posts to thread
 
+## Core Concepts
+
+**Service** = A microservice in your infrastructure (order-service, user-service, auth-service)
+
+**Service Catalog** = A database of all your services with metadata:
+- Who owns it (team, Slack channel, pager)
+- What it depends on (other services, databases)
+- Where to find logs and metrics (Grafana, OpenSearch, Prometheus)
+- What resources it manages
+
+**Resource** = Something a service creates and owns (ord-1234, usr-5678). When you say "debug ord-1234", the AI looks up which service owns `ord-*` pattern resources, then investigates that service.
+
+The AI uses the service catalog to understand your infrastructure. Without it, Claude has no idea what "order-service" is or where to look for logs.
+
 ## How Services Get Registered
 
 Every service team adds a `service.yaml` to their repo:
@@ -154,12 +168,7 @@ observability:
   prometheus_job: order-service
 ```
 
-## Understanding Resources vs Services
-
-This is important:
-
-- **Service** = the code that runs (order-service, user-service)
-- **Resource** = the things a service creates/owns (ord-1234, usr-5678)
+## How Resource Debugging Works
 
 When you say "Debug ord-1234":
 1. AI finds which service owns `ord-*` pattern → order-service
@@ -167,7 +176,7 @@ When you say "Debug ord-1234":
 3. AI checks order-service's dependencies, logs, pods
 4. AI diagnoses the issue
 
-**Only list resources your service is the system of record for.** If order-service reads from user-service, don't list `usr-*` in order-service's resources.
+**Important**: Only list resources your service is the system of record for. If order-service reads from user-service, don't list `usr-*` in order-service's resources.
 
 ## The BYO Resource Interface
 
