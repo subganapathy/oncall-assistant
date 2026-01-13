@@ -30,6 +30,38 @@ const resources: Record<string, Record<string, unknown>> = {
         cluster: "prod-us-east-1",
         error: "Database connection timeout after 30s",
     },
+    // AWS RDS outage scenario
+    "ord-9999": {
+        status: "FAILED",
+        created_at: "2024-01-12T03:40:00Z",
+        updated_at: "2024-01-12T03:42:00Z",
+        customer_id: "cust-123",
+        items: [
+            { sku: "PREMIUM-001", qty: 1 },
+        ],
+        total: 299.99,
+        region: "us-east",
+        namespace: "orders-us-east",
+        cluster: "prod-us-east-1",
+        error: "Connection refused to postgres-orders.rds.amazonaws.com:5432",
+        error_count: 847,
+        first_error_at: "2024-01-12T03:38:00Z",
+        aws_event: {
+            service: "RDS",
+            region: "us-east-1",
+            event_type: "connectivity_issues",
+            status: "ongoing",
+            started_at: "2024-01-12T03:38:00Z",
+            affected_resource: "postgres-orders",
+            aws_status_url: "https://health.aws.amazon.com/health/status",
+        },
+        recent_logs: [
+            "2024-01-12T03:42:15Z ERROR Connection refused to postgres-orders.rds.amazonaws.com:5432",
+            "2024-01-12T03:42:10Z ERROR Retry 3/3 failed: ECONNREFUSED",
+            "2024-01-12T03:42:05Z WARN Database connection pool exhausted",
+            "2024-01-12T03:38:00Z ERROR Initial connection failure to RDS",
+        ],
+    },
     "ord-5678": {
         status: "SHIPPED",
         created_at: "2024-01-09T08:00:00Z",
